@@ -65,6 +65,50 @@ class WuxiaWorldComSiteAdapter(BaseSiteAdapter):
     def use_pagecache(self):
         return True
 
+    def needToLoginCheck(self, data):
+        if 'Login' in data:
+            if 'This chapter requires karma or a VIP subscription to access.' in data:
+                return True
+            else:
+                return False
+        else:
+          return False
+
+    def performLogin(self, url):
+        params = {}
+
+        loginUrl = 'https://' + self.getSiteDomain() + '/account/login'
+        login_data = self._fetchUrl(loginUrl, usecache=False)
+        login_soup = self.make_soup(login_data)
+
+        if self.password:
+            params['Email'] = self.username
+            params['Password'] = self.password
+        else:
+            params['Email'] = self.getConfig("username")
+            params['Password'] = self.getConfig("password")
+
+        # copy all hidden input tags to pick up appropriate tokens.
+        for tag in login_soup.findAll('input',{'type':'hidden'}):
+            params[tag['name']] = tag['value']
+
+
+        
+        logger.debug("Will now login to URL (%s) as (%s)" % (loginUrl,
+                                                              params['Email']))
+
+        d = self._postUrl(loginUrl, params)
+
+        if "Your session has expired. Please log in again." in d:
+            d = self._postUrl(loginUrl, params)
+
+        if "Logout" not in d: #Member Account
+            logger.info("Failed to login to URL %s as %s" % (loginUrl, params['Email']))
+            raise exceptions.FailedToLogin(url,params['Email'])
+            return False
+        else:
+            return True
+
     def _parse_linked_data(self, soup):
         # See https://json-ld.org
         tag = soup.find('script', type='application/ld+json')
@@ -79,6 +123,8 @@ class WuxiaWorldComSiteAdapter(BaseSiteAdapter):
 
     def extractChapterUrlsAndMetadata(self):
         logger.debug('URL: %s', self.url)
+        if self.getConfig("password"):
+            self.performLogin(self.url)
         try:
             data = self._fetchUrl(self.url)
         except HTTPError as exception:
